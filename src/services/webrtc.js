@@ -106,15 +106,19 @@ class WebRTCManager {
     // Handle incoming audio tracks from the remote peer
     pc.ontrack = (event) => {
       console.log(`Received remote track from [${targetSocketId}]`);
-      if (this.onRemoteStreamAdded && event.streams[0]) {
-        this.onRemoteStreamAdded(targetSocketId, event.streams[0]);
+      let stream = event.streams[0];
+      if (!stream) {
+        stream = new MediaStream([event.track]);
+      }
+      if (this.onRemoteStreamAdded) {
+        this.onRemoteStreamAdded(targetSocketId, stream);
       }
     };
 
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState;
       console.log(`ICE connection state with [${targetSocketId}] changed to: ${state}`);
-      if (state === 'disconnected' || state === 'failed' || state === 'closed') {
+      if (state === 'failed' || state === 'closed') {
         this.closePeerConnection(targetSocketId);
         if (this.onRemoteStreamRemoved) {
           this.onRemoteStreamRemoved(targetSocketId);

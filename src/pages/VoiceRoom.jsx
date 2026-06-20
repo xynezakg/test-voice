@@ -13,10 +13,21 @@ const AudioPlayer = ({ stream }) => {
   useEffect(() => {
     if (audioRef.current && stream) {
       audioRef.current.srcObject = stream;
+      // Play programmatically to bypass browser autoplay blocks
+      audioRef.current.play().catch(error => {
+        console.warn("Audio autoplay blocked or failed:", error);
+      });
     }
   }, [stream]);
 
-  return <audio ref={audioRef} autoPlay style={{ display: 'none' }} />;
+  return (
+    <audio 
+      ref={audioRef} 
+      autoPlay 
+      playsInline 
+      style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none' }} 
+    />
+  );
 };
 
 export default function VoiceRoom() {
