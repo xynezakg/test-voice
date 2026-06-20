@@ -2,9 +2,11 @@ import { socket } from './socket.js';
 
 const ICE_SERVERS = {
   iceServers: [
-    {
-      urls: "stun:stun.l.google.com:19302"
-    }
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+    { urls: "stun:stun4.l.google.com:19302" }
   ]
 };
 
@@ -12,6 +14,7 @@ class WebRTCManager {
   constructor() {
     this.localStream = null;
     this.peers = new Map(); // targetSocketId -> RTCPeerConnection
+    this.iceQueues = new Map(); // targetSocketId -> Array of RTCIceCandidate
     
     // Callbacks for React UI updates
     this.onLocalStreamReady = null;
@@ -143,6 +146,27 @@ class WebRTCManager {
   }
 
   /**
+   * Process any ICE candidates that were received and queued before remote description was set.
+   */
+  async processIceQueue(socketId) {
+    const pc = this.peers.get(socketId);
+    if (!pc || !pc.remoteDescription) return;
+
+    const queue = this.iceQueues.get(socketId);
+    if (queue && queue.length > 0) {
+      console.log(`Processing ${queue.length} queued ICE candidates for [${socketId}]`);
+      for (const candidate of queue) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+          console.error(`Error adding queued ICE candidate for [${socketId}]:`, err);
+        }
+      }
+      this.iceQueues.set(socketId, []); // Clear queue
+    }
+  }
+
+  /**
    * Handle receiving an SDP offer from another peer
    */
   async handleOffer(fromSocketId, offer) {
@@ -156,6 +180,10 @@ class WebRTCManager {
 
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      
+      // Process any ICE candidates queued for this sender
+      await this.processIceQueue(fromSocketId);
+
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       
@@ -177,6 +205,9 @@ class WebRTCManager {
     if (pc) {
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        
+        // Process any ICE candidates queued for this sender
+        await this.processIceQueue(fromSocketId);
       } catch (err) {
         console.error(`Error setting remote description from [${fromSocketId}]:`, err);
       }
@@ -188,12 +219,22 @@ class WebRTCManager {
    */
   async handleIceCandidate(fromSocketId, candidate) {
     const pc = this.peers.get(fromSocketId);
-    if (pc) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch (err) {
-        console.error(`Error adding ICE candidate from [${fromSocketId}]:`, err);
+    
+    // If the peer connection doesn't exist or remote description isn't set yet, queue the candidate.
+    // Calling addIceCandidate before setRemoteDescription throws a DOMException in modern browsers.
+    if (!pc || !pc.remoteDescription) {
+      console.log(`Queueing ICE candidate from [${fromSocketId}] (remote description not set yet)`);
+      if (!this.iceQueues.has(fromSocketId)) {
+        this.iceQueues.set(fromSocketId, []);
       }
+      this.iceQueues.get(fromSocketId).push(candidate);
+      return;
+    }
+
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (err) {
+      console.error(`Error adding ICE candidate from [${fromSocketId}]:`, err);
     }
   }
 
@@ -205,6 +246,7 @@ class WebRTCManager {
     if (pc) {
       pc.close();
       this.peers.delete(socketId);
+      this.iceQueues.delete(socketId); // Clear queue references
       console.log(`RTCPeerConnection closed for [${socketId}]`);
     }
   }
