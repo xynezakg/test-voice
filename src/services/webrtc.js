@@ -272,6 +272,9 @@ class WebRTCManager {
       if (!AudioContextClass) return;
 
       this.audioContext = new AudioContextClass();
+      if (this.audioContext.state === 'suspended') {
+        this.audioContext.resume().catch(e => console.warn("Failed to resume AudioContext:", e));
+      }
       const source = this.audioContext.createMediaStreamSource(stream);
       this.analyser = this.audioContext.createAnalyser();
       this.analyser.fftSize = 512;
